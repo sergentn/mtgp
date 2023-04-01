@@ -3,12 +3,11 @@
 import argparse
 import re
 import requests
-
 import os
 
 # ---------- Functions
 
-MTGAFormatRegex = r'(\d)\s(.+)(?:\s\()(.+)(?:\))\s(\d+)'
+MTGAFormatRegex = r'(\d+)\s(.+)(?:\s\()(.+)(?:\))\s(\d+)'
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -17,8 +16,8 @@ def readListFile(path):
     f = open(path, 'r')
     return re.findall(MTGAFormatRegex, f.read())
 
-# ---------- Argument parser
 
+# ---------- Argument parser
 
 parser = argparse.ArgumentParser()
 
@@ -29,17 +28,22 @@ parser.add_argument('outputdir', type=str,
                     help='Path to output directory.')
 args = parser.parse_args()
 
+
 # ---------- Main script
 
 URL = "https://api.scryfall.com/cards/named"
+
+if not os.path.exists(args.outputdir):
+    print("Folder " + args.outputdir + " does not exist: creating it...")
+    os.makedirs(args.outputdir)
 
 for line in readListFile(args.deckfile):
     number_of_copies = line[0]
     cardname = line[1]
     set_name = line[2]
-    set_id = line[3]
-    print("Fetch " + str(number_of_copies) + " copies of '" +
-          cardname + "' from " + set_name + " (id = " + set_id + ")")
+    set_id = line[3] # unused atm as set_id can't be used with the API endpoint
+    
+    print("Fetch " + str(number_of_copies) + " copies of '" + cardname + "' from " + set_name + " (id = " + set_id + ")")
 
     request_params = {
         'exact': cardname,
@@ -52,13 +56,27 @@ for line in readListFile(args.deckfile):
 
     if 'image_uris' in request_result.keys():
         imageUrl = request_result['image_uris']['png']
-        #print('Image URL:', imageUrl)
         r = requests.get(imageUrl)
         with open(os.path.join(THIS_FOLDER, args.outputdir, str(number_of_copies) + ' ' + cardname + '.png'), 'wb') as f:
             f.write(r.content)
-        #print("Job done !")
+        
+    elif 'card_faces' in request_result.keys():
+        print("This is a double-faced card: printing both faces !")
+        
+        # print first face
+        imageUrl = request_result['card_faces'][0]['image_uris']['png']
+        r = requests.get(imageUrl)
+        with open(os.path.join(THIS_FOLDER, args.outputdir, str(number_of_copies) + ' ' + cardname + ' ' + 'Face 1.png'), 'wb') as f:
+            f.write(r.content)
+        
+        # print second face
+        imageUrl = request_result['card_faces'][1]['image_uris']['png']
+        r = requests.get(imageUrl)
+        with open(os.path.join(THIS_FOLDER, args.outputdir, str(number_of_copies) + ' ' + cardname + ' ' + 'Face 2.png'), 'wb') as f:
+            f.write(r.content)
+        
     else:
-        print('=> ' + cardname + " not found ! Please get the card manually.")
+        print("=> " + cardname + " not found ! Please get the card manually.")
 
 
 # Retrieve HTTP meta-data
