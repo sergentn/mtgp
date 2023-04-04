@@ -1,6 +1,6 @@
 # mtgp - Magic The Gathering Printer
 
-These small scripts allow you to create A4 sheets of MTG proxies in the PNG format, from a decklist in the MTG Arena text format or from any provided image files.
+These small scripts allow you to create sheets (of any dimensions) of MTG proxies in the PNG format, from a decklist in the MTG Arena text format or directly from image files.
 
 ## Install
 Tested with Python 3.10.6 on Ubuntu 22.04 as of 2023, April the 1st.
