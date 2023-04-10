@@ -2,7 +2,6 @@
 #
 # Improvements TODO:
 #   - multi-threading
-#   - read desired cards and sheets dimensions from a parameters file (ini file)
 #   - allow cards with different pixel sizes (using bin packing / knapsack solving algos ?)
 #   - refactor to remove global variables and make pure functions
 
@@ -18,16 +17,7 @@ import os
 
 from PIL import Image
 
-
-# ---------- Parameters
-
-#  TODO: read from a parameters file
-
-card_width_mm = 63
-card_height_mm = 88
-
-sheet_width_mm = 210
-sheet_height_mm = 297
+import Utilities
 
 
 #  ---------- Global variables
@@ -82,7 +72,7 @@ def saveSheet(sheet):
 # return a tuple (x, y) indicating the line and column of the next card
 def getLineAndColumnIndexes(current_card_idx, number_of_cards_per_line):
     
-    line = int((current_card_idx / number_of_cards_per_line))
+    line = int(current_card_idx / number_of_cards_per_line)
     column = int(current_card_idx % number_of_cards_per_line)
 
     return (line, column)
@@ -147,6 +137,17 @@ args = parser.parse_args()
 
 
 # ---------- Main script
+
+# Parameters
+config = Utilities.IniLoader('settings.ini')
+
+card_width_mm = int(config.getParam('dimensions', 'card_width_mm', 63))
+card_height_mm = int(config.getParam('dimensions', 'card_height_mm', 88))
+
+sheet_width_mm = int(config.getParam('dimensions', 'sheet_width_mm', 210))
+sheet_height_mm = int(config.getParam('dimensions', 'sheet_height_mm', 297))
+
+print(f'Printing cards of size: {card_width_mm}mm*{card_height_mm}mm on sheets of size: {sheet_width_mm}mm*{sheet_height_mm}mm (width*height)')
 
 # Try to swap sheet's width and height and see if we can put more cards: if yes, swap
 swapped_dimensions = False
