@@ -1,9 +1,8 @@
 # Needs Python 3.6 at least
 #
 # Improvements TODO:
-#   - multi-threading
 #   - allow cards with different pixel sizes (using bin packing / knapsack solving algos ?)
-#   - refactor to remove global variables and make pure functions
+#   - refactor to remove global variables and make pure functions (use some classes ?)
 
 # Bugs TODO:
 #
@@ -14,18 +13,11 @@
 import argparse
 import re
 import os
+import threading
 
 from PIL import Image
 
 import Utilities
-
-
-#  ---------- Global variables
-
-THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
-
-# we expect a number followed by a space in the card filename
-number_of_copies_REGEX = r'(\d+)\s.+'
 
 
 # ---------- Functions
@@ -59,14 +51,13 @@ def createBlankSheet():
 
 
 # save the sheet on the filesystem
-def saveSheet(sheet):
+def saveSheet(sheet, sheet_name):
     
-    global global_sheet_counter
+    global swapped_dimensions
     
     if swapped_dimensions:
         sheet = sheet.rotate(90, expand=True)
-    sheet.save(os.path.join(args.outputdir, 'sheet_' + str(global_sheet_counter) + '.png'), "PNG")
-    global_sheet_counter += 1
+    sheet.save(os.path.join(args.outputdir, sheet_name + '.png'), "PNG")
 
 
 # return a tuple (x, y) indicating the line and column of the next card
@@ -78,17 +69,25 @@ def getLineAndColumnIndexes(current_card_idx, number_of_cards_per_line):
     return (line, column)
 
 
+# print a sheet from a cardlist (thread function)
+def printSheet(sheet_cardlist, sheet_name):
+    
+    current_card_idx = 0
+    current_sheet = createBlankSheet()
+    for card_path, number_of_copies in sheet_cardlist.items():
+        current_card_idx = addCardsToSheet(current_sheet, card_path, number_of_copies, current_card_idx)
+    saveSheet(current_sheet, sheet_name)
+
+
 #  add the desired number of a same card to the sheets
-def addCards(card_path, number_of_copies, current_card_idx):
+def addCardsToSheet(sheet, card_path, number_of_copies, current_card_idx):
     
     global number_of_cards_per_line
-    global number_of_cards_per_sheet
-    global current_sheet
 
-    print("Printing " + number_of_copies + " copies of ", card_path)
+    print(f'Printing {str(number_of_copies)} copies of {card_path}')
     card_image = Image.open(card_path)
 
-    for i in range(int(number_of_copies)):
+    for i in range(number_of_copies):
         
         line_index, column_index = getLineAndColumnIndexes(current_card_idx, number_of_cards_per_line)
         current_card_idx += 1
@@ -96,16 +95,10 @@ def addCards(card_path, number_of_copies, current_card_idx):
         leftPosPx, topPosPx = getCardCoordinates(line_index, column_index)
         
         # the image position is determined by its upper left corner
-        current_sheet.paste(card_image, (leftPosPx, topPosPx))
-        
-        # we have placed all the cards we could on this sheet : save it and start a new one
-        if current_card_idx == number_of_cards_per_sheet:
-            current_card_idx = 0
-            saveSheet(current_sheet)
-            current_sheet = createBlankSheet()
+        sheet.paste(card_image, (leftPosPx, topPosPx))
             
     return current_card_idx
-        
+
 
 # place one card on the sheet
 def getCardCoordinates(line_index, column_index):
@@ -126,6 +119,7 @@ def getCardCoordinates(line_index, column_index):
 
 
 # ---------- Argument parser
+
 parser = argparse.ArgumentParser()
 
 # Mandatory args
@@ -149,6 +143,8 @@ sheet_height_mm = int(config.getParam('dimensions', 'sheet_height_mm', 297))
 
 print(f'Printing cards of size: {card_width_mm}mm*{card_height_mm}mm on sheets of size: {sheet_width_mm}mm*{sheet_height_mm}mm (width*height)')
 
+# ~ Determine global parameters
+
 # Try to swap sheet's width and height and see if we can put more cards: if yes, swap
 swapped_dimensions = False
 if (int(sheet_width_mm / card_width_mm) * int(sheet_height_mm / card_height_mm) < int(sheet_height_mm / card_width_mm) * int(sheet_width_mm / card_height_mm)):
@@ -170,19 +166,25 @@ space_btw_columns_perc = (100 - (card_width_perc * number_of_cards_per_line)) / 
 # Get sheet pixel size based on the first image resolution
 sheet_width_px, sheet_height_px = getPxSheetDimensions(args.inputdir)
 
+
+# ~ Read cards from filesystem
+
 #  Create the output folder if it does not exist already
 if not os.path.exists(args.outputdir):
-    print("Folder " + args.outputdir + " does not exist: creating it...")
+    print(f'Folder {args.outputdir} does not exist: creating it...')
     os.makedirs(args.outputdir)
-    
-# Sheets counter
-global_sheet_counter = 1
+
+THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
+
+# we expect a number followed by a space in the card filename
+number_of_copies_REGEX = r'(\d+)\s.+'
     
 # Create the first sheet
 current_card_idx = 0
 current_sheet = createBlankSheet()
+cards_to_print = {}
 
-# Print all cards
+# Build the cards_to_print dictionary of (card_path, number_of_copies)
 for cardFile in os.listdir(args.inputdir):
 
     filename = os.fsdecode(cardFile)
@@ -191,11 +193,51 @@ for cardFile in os.listdir(args.inputdir):
     if (filename_regex_result != None):
         number_of_copies = filename_regex_result.group(1)
     else:
-        print("No number of copies for " + filename + ", printing just one!")
+        print(f'No number of copies for {filename}, printing just one!')
         number_of_copies = "1"
 
     card_path = os.path.join(THIS_FOLDER, args.inputdir, cardFile)
-    current_card_idx = addCards(card_path, number_of_copies, current_card_idx)
+    cards_to_print[card_path] = int(number_of_copies)
 
-# Save last sheet
-saveSheet(current_sheet)
+
+# ~ Build an array of sheets
+
+current_number_of_cards = 0
+current_sheet = {}
+sheets_to_print = []
+
+print(f'There will be {number_of_cards_per_sheet} cards per sheet.')
+
+for card_path, number_of_copies in cards_to_print.items():
+   
+    if (current_number_of_cards + number_of_copies) <= number_of_cards_per_sheet:
+        current_number_of_cards += number_of_copies
+        current_sheet[card_path] = number_of_copies
+        
+    elif (current_number_of_cards + number_of_copies) > number_of_cards_per_sheet:
+        difference = number_of_cards_per_sheet - current_number_of_cards
+        current_sheet[card_path] = difference
+        sheets_to_print.append(current_sheet)
+        # start a new sheet with the rest of these cards to print
+        current_number_of_cards = 0
+        current_sheet = {}
+        rest_to_print = cards_to_print[card_path] - difference
+        current_sheet[card_path] = rest_to_print
+        current_number_of_cards = rest_to_print
+        
+    if (current_number_of_cards == number_of_cards_per_sheet):
+        sheets_to_print.append(current_sheet)
+        # reset for next sheet
+        current_number_of_cards = 0
+        current_sheet = {}
+        
+# Add the last (incomplete) sheet
+sheets_to_print.append(current_sheet)
+
+
+# ~ Print cards on sheets using one thread per sheet
+
+sheet_number = 0
+for sheet in sheets_to_print:
+    threading.Thread(target=printSheet, args=(sheet,str(sheet_number),)).start()
+    sheet_number += 1
